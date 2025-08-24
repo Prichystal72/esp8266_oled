@@ -1,10 +1,20 @@
+#include "Arduino.h"
+#include <Wire.h>
 #include <WiFi.h>
 #include <ESPmDNS.h>
 #include <WiFiClient.h>
-#include <U8g2lib.h>
-#include <Wire.h>
-#include <PCF8574.h>
-#include "esp_task_wdt.h"  // Přidání knihovny pro watchdog na ESP32
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include "PCF8574.h"
+#include "esp_task_wdt.h"
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+// TEST_MODE by default disabled to restore original behaviour
+#define TEST_MODE
+#define TEST_DEMO_INTERVAL 500 // interval v ms mezi spínáním
 
 #ifndef STASSID
 #define STASSID "rete.cz-Prichy"
@@ -14,9 +24,6 @@
 #define name "sonoff_00"
 
                            
-#define RELAY           1                                
-#define LED             2    
-#define REDLED          3  
 
 const char* ssid = STASSID;           // wifi ssid name
 const char* password = STAPSK;        // wifi password
@@ -36,18 +43,45 @@ int value3;
 int value4;
 
 // Water Sensor pins
-#define TRIG 2
-#define ECHO 0
+#define TRIG 12
+#define ECHO 13
 
-U8G2_SSD1306_128X64_NONAME_F_SW_I2C u8g2(U8G2_R0,  15, 4, U8X8_PIN_NONE);//SCL IO15  SDA  IO4
+// Kalibrační konstanty nádrže (upravte po instalaci podle skutečné nádrže)
+// NOTE: watchdog initialization intentionally performed inside setup();
+// accidental global-scope calls were removed to avoid compiler errors.
+#define TANK_EMPTY_CM 150     // Vzdálenost k prázdné nádrži (cm)
+#define TANK_FULL_CM 20       // Vzdálenost k plné nádrži (cm)
+
+// U8G2_SSD1306_128X64_NONAME_F_SW_I2C u8g2(U8G2_R0,  15, 4, U8X8_PIN_NONE);//SCL IO15  SDA  IO4
 
 // Set i2c address
-PCF8574 pcf8574(0x24,4,15);
-PCF8574 pcf8574_input(0x22,4,15);
+PCF8574 pcf8574(0x24);
+PCF8574 pcf8574_input(0x22);
+
 
 int layer = 0;
 
 WiFiServer server(80);
+
+// Funkce pro výpočet procent naplnění nádrže
+int calculateWaterPercentage(int distance) {
+  if (distance < 0) return -1;                  // Chyba měření
+  if (distance <= TANK_FULL_CM) return 100;    // Plná nádrž
+  if (distance >= TANK_EMPTY_CM) return 0;     // Prázdná nádrž
+  
+  // Výpočet procent (invertované - menší vzdálenost = více vody)
+  int percentage = map(distance, TANK_FULL_CM, TANK_EMPTY_CM, 100, 0);
+  return constrain(percentage, 0, 100);
+}
+
+// Funkce pro získání textového stavu nádrže
+String getTankStatus(int percentage) {
+  if (percentage < 0) return "CHYBA";
+  if (percentage >= 80) return "PLNA";
+  if (percentage >= 50) return "POLOPLNA";
+  if (percentage >= 20) return "NIZKA";
+  return "PRAZDNA";
+}
 
 void handleRequest(WiFiClient client, String request) {
   if (request.indexOf("GET /getdata") != -1) {
@@ -60,8 +94,22 @@ void handleRequest(WiFiClient client, String request) {
     value3 = request.indexOf("value3=") != -1 ? request.substring(request.indexOf("value3=") + 7, request.indexOf("&", request.indexOf("value3="))).toInt() : 0;
     value4 = request.indexOf("value4=") != -1 ? request.substring(request.indexOf("value4=") + 7, request.indexOf("&", request.indexOf("value4="))).toInt() : 0;
 
+    // Odstraněno: měření přes TRIG/ECHO
+    // Zobrazíme pouze poslední naměřené hodnoty
+    extern int distance;
+    extern int waterPercentage;
     String response = "<html><body>";
-    response += "<h1>Data from device:</h1>";
+    response += "<h1>Zavlazovaci system:</h1>";
+    response += "<h2>Nadrz na vodu:</h2>";
+    if (distance > 0) {
+      response += "<p><b>Vzdalenost k hladine: " + String(distance) + " cm</b></p>";
+      response += "<p><b>Naplneni nadrze: " + String(waterPercentage) + " %</b></p>";
+      response += "<p><b>Stav nadrze: " + getTankStatus(waterPercentage) + "</b></p>";
+    } else {
+      response += "<p><b>Chyba mereni senzoru!</b></p>";
+    }
+    response += "<hr>";
+    response += "<h2>Stavove data:</h2>";
     response += "<p>online = " + String(online) + "</p>";
     response += "<p>switchState = " + String(switchState) + "</p>";
     response += "<p>status1 = " + String(status1) + "</p>";
@@ -72,7 +120,7 @@ void handleRequest(WiFiClient client, String request) {
     response += "<p>value4 = " + String(value4) + "</p>";
 
     int32_t rssi = WiFi.RSSI();
-    response += "<p>Signal strength (RSSI):" + String(rssi) + "dBm </p>"; 
+    response += "<hr><p>Signal strength (RSSI): " + String(rssi) + " dBm</p>"; 
     response += "</body></html>";
 
     client.println("HTTP/1.1 200 OK");
@@ -89,46 +137,90 @@ void handleRequest(WiFiClient client, String request) {
   }
 }
 
+
+
 void setup(void) {
   Serial.begin(115200);
+  Wire.begin(4, 15); // SDA=4, SCL=15
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0,0);
+  display.println("Sonoff Zavlazovani");
+  display.display();
+  delay(1000);
   
-  u8g2.setI2CAddress(0x3C*2);
-  u8g2.begin();
-  u8g2.enableUTF8Print();
-  
+  // Inicializace WiFi
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
 
- // Nastavení pinů a jejich stavů pomocí smyčky
-for (int pin = 0; pin <= 5; pin++) {
-  pcf8574.pinMode(pin, OUTPUT);
-  pcf8574.digitalWrite(pin, HIGH);
-}
-
- // Nastavení pinů a jejich stavů pomocí smyčky
-for (int pin = 0; pin <= 5; pin++) {
-  pcf8574_input.pinMode(pin, INPUT);
-
-}
+  pcf8574.pinMode(P0, OUTPUT);
+  pcf8574.pinMode(P1, OUTPUT);
+  pcf8574.pinMode(P2, OUTPUT);
+  pcf8574.pinMode(P3, OUTPUT);
+  pcf8574.pinMode(P4, OUTPUT);
+  pcf8574.pinMode(P5, OUTPUT);
 
 
+  pcf8574.digitalWrite(P0, HIGH);
+  pcf8574.digitalWrite(P1, HIGH);
+  pcf8574.digitalWrite(P2, HIGH);
+  pcf8574.digitalWrite(P3, HIGH);
+  pcf8574.digitalWrite(P4, HIGH);
+  pcf8574.digitalWrite(P5, HIGH);
+
+  Serial.print("Init pcf8574...");
   if (pcf8574.begin()) {
-    Serial.println("PCF8574 OK");
+    Serial.println("OK");
   } else {
-    Serial.println("PCF8574 KO");
+    Serial.println("KO");
   }
 
-  if (pcf8574_input.begin()) {
+
+  pcf8574_input.pinMode(P0, INPUT);
+  pcf8574_input.pinMode(P1, INPUT);
+  pcf8574_input.pinMode(P2, INPUT);
+  pcf8574_input.pinMode(P3, INPUT);
+  pcf8574_input.pinMode(P4, INPUT);
+  pcf8574_input.pinMode(P5, INPUT);
+
+  bool pcf_input_ok = pcf8574_input.begin();
+  if (pcf_input_ok) {
     Serial.println("PCF8574_input OK");
   } else {
     Serial.println("PCF8574_input KO");
   }
 
+  display.clearDisplay();
+  display.setCursor(0,0);
+  display.println("WiFi pripojeni:");
+  display.println(ssid);
+  display.display();
+  delay(1000);
 
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".......");
+    display.clearDisplay();
+    display.setCursor(0,0);
+    display.println("Pripojuji WiFi...");
+    display.println("Cekam na sit");
+    display.display();
   }
+
+  display.clearDisplay();
+  display.setCursor(0,0);
+  display.println("WiFi: PRIPOJENO");
+  display.print("IP: ");
+  display.println(WiFi.localIP());
+  int32_t rssi = WiFi.RSSI();
+  display.print("Signal: ");
+  display.print(rssi);
+  display.println(" dBm");
+  display.display();
+  delay(2000);
+  
   Serial.println("");
   Serial.print("Connected to ");
   Serial.println(ssid);
@@ -137,6 +229,11 @@ for (int pin = 0; pin <= 5; pin++) {
 
   if (!MDNS.begin(name)) {
     Serial.println("Error setting up MDNS responder!");
+    display.clearDisplay();
+    display.setCursor(0,0);
+    display.println("mDNS: CHYBA");
+    display.display();
+    delay(1000);
     while (1) { delay(1000); }
   }
   Serial.println("mDNS responder started");
@@ -146,12 +243,50 @@ for (int pin = 0; pin <= 5; pin++) {
 
   MDNS.addService("http", "tcp", 80);
 
-  esp_task_wdt_init(8, true);  // Nastaví watchdog na 8 sekund
+  display.clearDisplay();
+  display.setCursor(0,0);
+  display.println("Server: SPUSTEN");
+  display.println("mDNS: OK");
+  display.println("HTTP: port 80");
+  display.println("Watchdog: OK");
+  display.display();
+  delay(1500);
 
-  //pcf8574.digitalWrite(P1,  HIGH);
+  esp_task_wdt_config_t twdt_config = {
+      .timeout_ms = 8000,
+      .idle_core_mask = (1 << portNUM_PROCESSORS) - 1,
+      .trigger_panic = true
+  };
+  esp_task_wdt_init(&twdt_config);
+  esp_task_wdt_add(NULL);
+
+  display.clearDisplay();
+  display.setCursor(0,0);
+  display.println("SYSTEM PRIPRAVEN");
+  display.println("Senzor: AJ-SR04M");
+  display.println("Displej: SSD1306");
+  display.println("Spoustim...");
+  display.display();
+  delay(1000);
+
+  // Nastavení režimu pinů pro ultrazvukový senzor
+  pinMode(TRIG, OUTPUT);
+  pinMode(ECHO, INPUT);
+  digitalWrite(TRIG, LOW); // TRIG na začátku v LOW
+
 }
 
-void loop(void) {
+int distance = 0;
+int waterPercentage = 0;
+
+void loop() {
+  delay(1000);
+  //pcf8574.digitalWrite(P0, HIGH);
+  Serial.println("P0 LOW");
+  delay(1000);
+ // pcf8574.digitalWrite(P0, LOW);
+  Serial.println("P0 HIGH");
+  // ...existing code... (běžný provoz)
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("WiFi connection lost. Restarting...");
     ESP.restart();
@@ -159,26 +294,56 @@ void loop(void) {
 
   esp_task_wdt_reset();  // Obnovení watchdogu
 
+  //  měření ultrazvukem
+  
   if (millis() - lastExecutedMillis >= refresh_time_display) {
-    //digitalWrite(TRIG, LOW); 
-    delayMicroseconds(2); 
-    //digitalWrite(TRIG, HIGH);  
-    delayMicroseconds(20); 
-    //digitalWrite(TRIG, LOW);  
+    // Spuštění ultrazvukového měření
+    digitalWrite(TRIG, LOW);
+    delayMicroseconds(100);
+    digitalWrite(TRIG, HIGH);
+    delayMicroseconds(300);
+    digitalWrite(TRIG, LOW);
 
-    int distance = pulseIn(ECHO, HIGH, 26000) / 58; 
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_ncenB08_tr);
-    u8g2.drawStr(0, 15, "Stav vody:");
-    u8g2.setFont(u8g2_font_fub30_tr); 
+    // Měření času ozvěny a výpočet vzdálenosti
+    long duration = pulseIn(ECHO, HIGH, 30000); // Timeout 30ms
 
-    char buffer[10];
-    sprintf(buffer, "%d mm", distance);
-    u8g2.drawStr(0, 60, buffer);
-    u8g2.sendBuffer();
+    if (duration > 0) {
+      distance = duration * 0.034 / 2; // Převod na cm (rychlost zvuku 340 m/s)
+    } else {
+      distance = -1; // Chyba měření
+    }
+
+    // Výpočet procent naplnění
+    waterPercentage = calculateWaterPercentage(distance);
+    String tankStatus = getTankStatus(waterPercentage);
+
+    // Výpis na displej (Adafruit_SSD1306)
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(0,0);
+    if (waterPercentage >= 0) {
+      display.print("Nadrz: ");
+      display.print(waterPercentage);
+      display.println("%");
+      display.print("Stav: ");
+      display.println(tankStatus);
+    } else {
+      display.println("CHYBA SENZORU");
+    }
+    display.setTextSize(2);
+    display.setCursor(0, 32);
+    if (distance > 0) {
+      display.print(distance);
+      display.println(" cm");
+    } else {
+      display.println("---");
+    }
+    display.display();
 
     lastExecutedMillis = millis();
   }
+  
 
   WiFiClient client = server.available();
   if (client) {
@@ -197,7 +362,7 @@ void loop(void) {
         handleRequest(client, request);
       }
     }
-    
+
     if (!client.connected()) {
       client.stop();
     }
@@ -206,10 +371,5 @@ void loop(void) {
   if (switchState_in == 0) {switchState = false;}
   if (switchState_in == 1) {switchState = true; }
 
-
-
-
-  pcf8574.digitalWrite(RELAY, switchState ? LOW : HIGH);
-  pcf8574.digitalWrite(8, switchState ? LOW : HIGH);
-  
+  //pcf8574.digitalWrite(P1, switchState ? LOW : HIGH);
 }
