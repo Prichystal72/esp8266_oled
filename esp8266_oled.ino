@@ -17,8 +17,8 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 #define TEST_DEMO_INTERVAL 500 // interval v ms mezi spínáním
 
 #ifndef STASSID
-#define STASSID "rete.cz-Prichy"
-#define STAPSK "adamekprichy1"
+#define STASSID "xxxxxxxx"
+#define STAPSK "xxxxxxxxx"
 #endif
 
 #define name "sonoff_00"
