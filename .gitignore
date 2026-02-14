@@ -1,0 +1,16 @@
+# Ignore Arduino build and OS files
+*.bin
+*.elf
+*.hex
+*.pyc
+*.pyo
+*.swp
+*.bak
+*.tmp
+*.dmp
+*.log
+*.DS_Store
+*.vscode/
+__pycache__/
+*.ino.*
+*.dist/

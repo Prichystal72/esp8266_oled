@@ -1,60 +1,57 @@
+/*
+  Projekt: OLED displej s ESP8266
+  Autor: (doplňte své jméno)
+  
+  Tento program je určený pro čip ESP8266 (například NodeMCU nebo Wemos D1 mini) a OLED displej 128x64 pixelů s čipem SSD1306.
 
-// Knihovna pro komunikaci přes I2C (propojení s OLED displejem)
-#include <Wire.h>
-// Knihovna pro WiFi připojení (zatím není využita)
-#include <WiFi.h>
-// Knihovna pro grafické funkce (základ pro práci s displejem)
-#include <Adafruit_GFX.h>
-// Knihovna pro ovládání OLED displeje SSD1306
-#include <Adafruit_SSD1306.h>
+  Jak postupovat v Arduino IDE:
+  --------------------------------
+  1. V menu "Nástroje > Deska" vyberte: "NodeMCU 1.0 (ESP-12E Module)" nebo jinou odpovídající ESP8266 desku.
+  2. Připojte OLED displej podle popisu níže:
+     - SDA (datový drát) na pin D5 (GPIO14)
+     - SCL (hodinový drát) na pin D6 (GPIO12)
+  3. Nahrajte knihovny:
+     - Adafruit SSD1306
+     - Adafruit GFX
+     - Wire
+  4. Vložte tento kód do Arduino IDE a nahrajte do desky.
 
+  Poznámka: Pokud používáte jiné piny nebo jiný typ displeje, upravte nastavení v kódu.
+*/
 
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
-// inicializace displeje s použitím I2C (SDA=12 (D6), SCL=14 (D5))
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+#include <Wire.h>                // Knihovna pro komunikaci mezi čipem a displejem (tzv. I2C)
+#include <Adafruit_GFX.h>        // Knihovna, která umí kreslit text a obrázky na displej
+#include <Adafruit_SSD1306.h>    // Knihovna pro konkrétní typ displeje, který používáme
 
+#define SCREEN_WIDTH 128   // Šířka displeje v pixelech (tečkách)
+#define SCREEN_HEIGHT 64   // Výška displeje v pixelech (tečkách)
 
-// --- Nastavení WiFi (zatím není využito, pouze pro ukázku) ---
-#ifndef STASSID  // Pokud není definováno, nastaví se výchozí hodnoty
-#define STASSID "xxxxxxxx"   // zde zadejte název vaší WiFi sítě
-#define STAPSK "xxxxxxxxx"   // zde zadejte heslo k WiFi
-#endif
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire); // Nastavení displeje s rozměry a komunikací
 
-const char* ssid = STASSID;      // proměnná pro název WiFi
-const char* password = STAPSK;   // proměnná pro heslo k WiFi
+#define I2C_SDA 14  // Pin číslo 14 na čipu (označený jako D5 na desce) - datový drát
+#define I2C_SCL 12  // Pin číslo 12 na čipu (označený jako D6 na desce) - hodinový drát
 
-
-// Funkce setup() se spustí pouze jednou po startu nebo resetu zařízení
 void setup() {
-  Serial.begin(115200); // Nastavení rychlosti sériové komunikace pro ladění (výpisy do PC)
-  // Inicializace I2C sběrnice na pinech SDA=12 a SCL=14 (pro OLED displej)
-  Wire.begin(12, 14);
-  // Inicializace OLED displeje, adresa 0x3C je běžná pro tento typ displeje
-  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
-  display.clearDisplay(); // Vymaže obsah displeje
-  display.setTextSize(2); // Nastaví velikost písma (2x větší než základní)
-  display.setTextColor(SSD1306_WHITE); // Nastaví barvu textu (bílá)
-  display.setCursor(0, 20); // Nastaví pozici kurzoru (x=0, y=20)
-  display.println("Ahoj svete"); // Vypíše text na displej
-  display.display(); // Aktualizuje displej, aby se změny projevily
-  delay(1000); // Počká 1 sekundu
+  Serial.begin(115200); // Nastartujeme "sériovou linku" pro ladění (můžeme pak vidět zprávy v počítači)
+  Wire.begin(I2C_SDA, I2C_SCL); // Spustíme komunikaci po drátech SDA a SCL
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { 
+    Serial.println(F("SSD1306 allocation failed"));
+    for(;;);
+  }
+  display.clearDisplay();
+  display.setTextSize(1);      // Velikost písma (1 = nejmenší)
+  display.setTextColor(WHITE); // Barva písma (bílá, protože displej je černobílý)
+  display.setCursor(0, 0);     // Začneme psát úplně vlevo nahoře
+  display.println(F("Zluty radek"));      // První řádek textu, který se zobrazí
+  display.println(F(""));   // Druhý řádek textu
+  display.println(F("Modry radek"));     // Třetí řádek textu, který se zobrazí 
+  display.setTextSize(2);      // Změníme velikost písma na větší (2 = dvojnásobná velikost) 
+  display.setCursor(0, 30);    // Posuneme kurzor trochu dolů, aby se text překrýval
+  display.println(F("Velikost 2"));    // Čtvrtý řádek
+  display.display();  // Tímto příkazem opravdu pošleme vše na displej, aby se to ukázalo
 }
 
-
-// Funkce loop() se opakuje stále dokola, dokud je zařízení zapnuté
 void loop() {
-  static unsigned long counter = 0; // Statická proměnná uchovává hodnotu mezi průchody
-  Serial.print("Hodnota čítače: "); // Vypíše text do sériového monitoru
-  Serial.println(counter++);         // Vypíše hodnotu čítače a zvýší ji o 1
-  delay(500); // Počká 0,5 sekundy
+  // Tato část by se opakovala pořád dokola, dokud je čip zapnutý.
+  // Zatím tu nic není, ale sem můžeme později přidat další funkce.
 }
-
-// --- Připojení k WiFi (ponecháno pouze pro ukázku, zakomentováno) ---
-// Pokud byste chtěli připojit zařízení k WiFi, odkomentujte následující řádky a zadejte správné údaje:
-// WiFi.mode(WIFI_STA);              // Nastaví režim WiFi na stanici (klient)
-// WiFi.begin(ssid, password);       // Zahájí připojení k WiFi síti
-// while (WiFi.status() != WL_CONNECTED) { // Čeká, dokud není připojeno
-//   delay(500);
-// }
-// ---------------------------------------------------------------
